@@ -1,9 +1,5 @@
 use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
-    io::Write,
-    path::Path,
+    borrow::Cow, collections::{BTreeMap, BTreeSet, HashSet}, fmt::format, fs::{self, File}, io::Write, path::Path
 };
 
 use crate::{
@@ -27,7 +23,7 @@ use tauri::{ipc::Invoke, Manager, Runtime};
 /// You can extend this example by calling other methods on the builder to configure your application further.
 ///
 /// ```rust,ignore
-/// use tauri_specta::{collect_commands, collect_events, Builder};
+/// use souchy_tauri_specta::{collect_commands, collect_events, Builder};
 /// use specta_typescript::Typescript;
 ///
 ///
@@ -55,7 +51,7 @@ use tauri::{ipc::Invoke, Manager, Runtime};
 /// # Exporting using JSDoc
 ///
 /// ```rust,ignore
-/// use tauri_specta::{collect_commands,collect_events,Builder};
+/// use souchy_tauri_specta::{collect_commands,collect_events,Builder};
 /// use specta_jsdoc::JSDoc;
 ///
 ///
@@ -85,6 +81,8 @@ pub struct Builder<R: Runtime = tauri::Wry> {
     plugin_name: Option<&'static str>,
     commands: Commands<R>,
     command_types: Vec<Function>,
+    command_modules: Vec<&'static str>,
+    class_modules: HashSet<&'static str>,
     error_handling: ErrorHandlingMode,
     events: BTreeMap<&'static str, DataType>,
     event_sids: BTreeSet<SpectaID>,
@@ -98,6 +96,8 @@ impl<R: Runtime> Default for Builder<R> {
             plugin_name: None,
             commands: Commands::default(),
             command_types: Default::default(),
+            command_modules: Default::default(),
+            class_modules: Default::default(),
             error_handling: Default::default(),
             events: Default::default(),
             event_sids: Default::default(),
@@ -130,7 +130,7 @@ impl<R: Runtime> Builder<R> {
     /// # Example
     ///
     /// ```rust,ignore-windows
-    /// use tauri_specta::{Builder, collect_commands};
+    /// use souchy_tauri_specta::{Builder, collect_commands};
     ///
     /// #[tauri::command]
     /// #[specta::specta]
@@ -143,9 +143,18 @@ impl<R: Runtime> Builder<R> {
     pub fn commands(mut self, commands: Commands<R>) -> Self {
         Self {
             command_types: (commands.1)(&mut self.types),
+            command_modules: commands.2.clone(),
             commands,
             ..self
         }
+    }
+
+    /// Register class names with the builder.
+    pub fn class(mut self, class_modules: &[&'static str]) -> Self {
+        for module in class_modules {
+            self.class_modules.insert(*module);
+        }
+        self
     }
 
     /// Register events with the builder.
@@ -157,7 +166,7 @@ impl<R: Runtime> Builder<R> {
     /// ```rust,ignore-windows
     /// use serde::{Serialize, Deserialize};
     /// use specta::Type;
-    /// use tauri_specta::{Builder, collect_events, Event};
+    /// use souchy_tauri_specta::{Builder, collect_events, Event};
     ///
     /// #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
     /// pub struct DemoEvent(String);
@@ -201,7 +210,7 @@ impl<R: Runtime> Builder<R> {
     /// # Example
     ///
     /// ```rust,ignore-windows
-    /// use tauri_specta::Builder;
+    /// use souchy_tauri_specta::Builder;
     /// use serde::{Serialize, Deserialize};
     /// use specta::Type;
     ///
@@ -225,7 +234,7 @@ impl<R: Runtime> Builder<R> {
     /// # Example
     ///
     /// ```rust,ignore-windows
-    /// use tauri_specta::Builder;
+    /// use souchy_tauri_specta::Builder;
     ///
     /// let mut builder = Builder::<tauri::Wry>::new().constant("CONSTANT_NAME","ANY_CONSTANT_VALUE");
     /// ```
@@ -261,7 +270,7 @@ impl<R: Runtime> Builder<R> {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use tauri_specta::{Builder, collect_events};
+    /// use souchy_tauri_specta::{Builder, collect_events};
     ///
     /// let mut builder = Builder::<tauri::Wry>::new().events(collect_events![]);
     ///
@@ -303,7 +312,7 @@ impl<R: Runtime> Builder<R> {
     ///
     /// println!(
     ///     "{}",
-    ///     tauri_specta::Builder::<tauri::Wry>::new()
+    ///     souchy_tauri_specta::Builder::<tauri::Wry>::new()
     ///         .export_str(Typescript::new())
     ///         .unwrap()
     /// );
@@ -315,11 +324,14 @@ impl<R: Runtime> Builder<R> {
         language.render(&crate::ExportContext {
             // TODO: Don't clone stuff
             commands: self.command_types.clone(),
+            command_modules: self.command_modules.clone(),
+            class_modules: self.class_modules.clone(),
             error_handling: self.error_handling,
             events: self.events.clone(),
             type_map: self.types.clone(),
             constants: self.constants.clone(),
             plugin_name: self.plugin_name,
+            per_file: false,
         })
     }
 
@@ -327,7 +339,7 @@ impl<R: Runtime> Builder<R> {
     ///
     /// # Example
     /// ```rust,ignore-windows
-    /// use tauri_specta::{Builder, collect_commands, collect_events};
+    /// use souchy_tauri_specta::{Builder, collect_commands, collect_events};
     /// use specta_typescript::Typescript;
     ///
     /// let mut builder = Builder::<tauri::Wry>::new()
@@ -353,6 +365,49 @@ impl<R: Runtime> Builder<R> {
         write!(file, "{}", self.export_str(&language)?)?;
         language.format(path).ok(); // TODO: Error handling
 
+        Ok(())
+    }
+
+    /// Export the bindings to multiple files.
+    /// Path is a directory.
+    pub fn export_per_file<L: LanguageExt>(
+        &self,
+        language: L,
+        path: impl AsRef<Path>,
+    ) -> Result<(), L::Error> {
+
+        let cfg = &crate::ExportContext {
+            // TODO: Don't clone stuff
+            commands: self.command_types.clone(),
+            command_modules: self.command_modules.clone(),
+            class_modules: self.class_modules.clone(),
+            error_handling: self.error_handling,
+            events: self.events.clone(),
+            type_map: self.types.clone(),
+            constants: self.constants.clone(),
+            plugin_name: self.plugin_name,
+            per_file: true,
+        };
+        let files = language.render_per_file(cfg)?.content_per_file;
+
+        let path = path.as_ref();
+        fs::create_dir_all(path)?;
+
+        for (file_name, content) in files {
+            let mut parts = file_name.split("::").collect::<Vec<_>>();
+            let mut file_name = parts.pop().unwrap().to_string(); // remove last part (the file name)
+            if file_name == ".ts" || file_name == ".js" {
+                file_name = format!("index{}", file_name); // if no name, use index.ts/js
+            }
+            let folder_path = path.join(parts.iter().next().unwrap_or(&"".into())); //parts.join("/")); // create subdirectories for namespaces
+            fs::create_dir_all(&folder_path)?;
+
+            let file_path = folder_path.join(file_name);
+            let mut file = File::create(&file_path)?;
+            write!(file, "{content}")?;
+            language.format(&file_path).ok(); // TODO: Error handling
+        }
+        
         Ok(())
     }
 }

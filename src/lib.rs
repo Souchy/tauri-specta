@@ -45,7 +45,7 @@
 //!
 //! use serde::{Deserialize, Serialize};
 //! use specta_typescript::Typescript;
-//! use tauri_specta::{collect_commands, Builder};
+//! use souchy_tauri_specta::{collect_commands, Builder};
 //!
 //! #[tauri::command]
 //! #[specta::specta] // < You must annotate your commands
@@ -84,7 +84,7 @@
 //! with [`specta_jsdoc::JSDoc`](https://docs.rs/specta-jsdoc/latest/specta_jsdoc/struct.JSDoc.html) like the following:
 //!
 //! ```rust,ignore-windows
-//! let mut builder = tauri_specta::Builder::<tauri::Wry>::new();
+//! let mut builder = souchy_tauri_specta::Builder::<tauri::Wry>::new();
 //!
 //! #[cfg(debug_assertions)]
 //! builder
@@ -113,7 +113,7 @@
 //! }
 //!
 //! // Call `typ()` as much as you want.
-//! let mut builder = tauri_specta::Builder::<tauri::Wry>::new().typ::<MyStruct>();
+//! let mut builder = souchy_tauri_specta::Builder::<tauri::Wry>::new().typ::<MyStruct>();
 //! ```
 //!
 //! ## Events
@@ -123,9 +123,9 @@
 //! ```rust,ignore-windows
 //! use serde::{Serialize, Deserialize};
 //! use specta::Type;
-//! use tauri_specta::{Builder, collect_commands, collect_events, Event};
+//! use souchy_tauri_specta::{Builder, collect_commands, collect_events, Event};
 //!
-//! // Add `tauri_specta::Event` to your event
+//! // Add `souchy_tauri_specta::Event` to your event
 //! #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 //! pub struct DemoEvent(String);
 //!
@@ -184,7 +184,7 @@
 )]
 
 use core::fmt;
-use std::{borrow::Cow, collections::BTreeMap, path::Path, sync::Arc};
+use std::{borrow::Cow, collections::{BTreeMap, HashSet}, path::Path, sync::Arc};
 
 use specta::{
     datatype::{self, DataType},
@@ -198,7 +198,7 @@ use tauri::{ipc::Invoke, Runtime};
 ///
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
-pub use tauri_specta_macros::Event;
+pub use souchy_tauri_specta_macros::Event;
 
 mod builder;
 mod event;
@@ -217,6 +217,8 @@ pub struct Commands<R: Runtime>(
     // Bounds copied from `tauri::Builder::invoke_handler`
     pub(crate) Arc<dyn Fn(Invoke<R>) -> bool + Send + Sync + 'static>,
     pub(crate) fn(&mut TypeMap) -> Vec<datatype::Function>,
+    /// Module path for each command
+    pub(crate) Vec<&'static str>,
 );
 
 impl<R: Runtime> fmt::Debug for Commands<R> {
@@ -230,6 +232,7 @@ impl<R: Runtime> Default for Commands<R> {
         Self(
             Arc::new(tauri::generate_handler![]),
             ::specta::function::collect_functions![],
+            vec![],
         )
     }
 }
@@ -247,10 +250,52 @@ pub struct Events(BTreeMap<&'static str, fn(&mut TypeMap) -> (SpectaID, DataType
 pub struct ExportContext {
     pub plugin_name: Option<&'static str>,
     pub commands: Vec<datatype::Function>,
+    pub command_modules: Vec<&'static str>,
+    pub class_modules: HashSet<&'static str>,
     pub error_handling: ErrorHandlingMode,
     pub events: BTreeMap<&'static str, DataType>,
     pub type_map: TypeMap,
     pub constants: BTreeMap<Cow<'static, str>, serde_json::Value>,
+    pub per_file: bool,
+}
+
+/// Exports files content
+#[derive(Default, Debug, Clone)]
+pub struct ExportFiles {
+    /// File content keyed by file name
+    pub content_per_file: BTreeMap<String, String>,
+}
+impl ExportFiles {
+    /// Creates a new instance of `ExportFiles`.
+    pub fn new() -> Self {
+        Self {
+            content_per_file: BTreeMap::new(),
+        }
+    }
+    /// Sets the constants file content
+    pub fn set_constants(&mut self, s: String) {
+        self.content_per_file.insert("constants.ts".to_string(), s);
+    }
+    /// Sets the types file content
+    pub fn set_types(&mut self, s: String) {
+        self.content_per_file.insert("types.ts".to_string(), s);
+    }
+    /// Sets the commands file content
+    pub fn set_commands(&mut self, s: String) {
+        self.content_per_file.insert("commands.ts".to_string(), s);
+    }
+    /// Sets the events file content
+    pub fn set_events(&mut self, s: String) {
+        self.content_per_file.insert("events.ts".to_string(), s);
+    }
+    /// Sets the globals file content
+    pub fn set_globals(&mut self, s: String) {
+        self.content_per_file.insert("globals.ts".to_string(), s);
+    }
+    /// Sets a module file content
+    pub fn set_module(&mut self, module: String, content: String) {
+        self.content_per_file.insert(format!("{}.ts", module), content);
+    }
 }
 
 /// Implemented for all languages which Tauri Specta supports exporting to.
@@ -267,6 +312,9 @@ pub trait LanguageExt {
 
     /// TODO
     fn format(&self, path: &Path) -> Result<(), Self::Error>;
+
+    /// render the bindings per file
+    fn render_per_file(&self, cfg: &ExportContext) -> Result<ExportFiles, Self::Error>;
 }
 
 impl<L: LanguageExt> LanguageExt for &L {
@@ -278,6 +326,10 @@ impl<L: LanguageExt> LanguageExt for &L {
 
     fn format(&self, path: &Path) -> Result<(), Self::Error> {
         (*self).format(path)
+    }
+    
+    fn render_per_file(&self, cfg: &ExportContext) -> Result<ExportFiles, Self::Error> {
+        (*self).render_per_file(cfg)
     }
 }
 
@@ -321,11 +373,12 @@ pub mod internal {
     pub fn command<R: Runtime, F>(
         f: F,
         types: fn(&mut TypeMap) -> Vec<datatype::Function>,
+        module_paths: Vec<&'static str>,
     ) -> Commands<R>
     where
         F: Fn(Invoke<R>) -> bool + Send + Sync + 'static,
     {
-        Commands(Arc::new(f), types)
+        Commands(Arc::new(f), types, module_paths)
     }
 
     /// called by `collect_events` to register events to an `Events`
