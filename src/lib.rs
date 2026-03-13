@@ -32,6 +32,7 @@
 //! - `derive` - Enables the `Event` derive macro. This is only required if your using events.
 //! - `javascript` - Enables the JSDoc exporter.
 //! - `typescript` - Enables the Typescript exporter.
+//! - `sqlx` - Enables integration with SQLx. This provides a [`Type`] implementation for `sqlx::types::Json<T>` which forwards to the inner type `T`.
 //!
 //! ## Setup
 //!
@@ -204,6 +205,7 @@ mod builder;
 mod event;
 mod lang;
 mod macros;
+pub mod integrations;
 
 pub use builder::Builder;
 pub(crate) use event::EventRegistry;

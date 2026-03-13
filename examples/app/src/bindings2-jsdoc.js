@@ -212,6 +212,10 @@ export const universalConstant = 42;
  * @typedef { { some_field: string } } MyStruct
  */
 
+/**
+ * @typedef { { a: string; json_array: string[][]; json_string: string; array_string: string[]; test_json: string[] } } Testing
+ */
+
 
 /** tauri-specta globals **/
 

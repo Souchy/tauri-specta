@@ -18,10 +18,13 @@ rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
+default = ["sqlx", "sqlx-sqlite"]
 derive = ["dep:souchy-tauri-specta-macros"]
 javascript = ["dep:specta-jsdoc"]
 typescript = ["dep:specta-typescript"]
+sqlx = ["dep:sqlx"]
+sqlx-json = ["dep:sqlx", "sqlx/json"]
+sqlx-sqlite = ["dep:sqlx", "sqlx/sqlite"]
 
 [lints]
 workspace = true
@@ -36,6 +39,7 @@ serde = "1"
 serde_json = "1"
 thiserror = "2"
 tauri = { workspace = true, features = ["specta"] }
+sqlx = { version = "0.8.6", features = ["json"], optional = true }
 
 # Private
 heck = "0.5.0"

@@ -13,11 +13,11 @@ publish = false
 tauri-build = { workspace = true, features = [] }
 
 [dependencies]
-serde_json = "1.0"
-specta = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
 tauri = { workspace = true, features = [] }
-souchy-tauri-specta = { path = "../../../", features = ["derive", "typescript", "javascript"] }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+souchy-tauri-specta = { path = "../../../", features = ["derive", "typescript", "javascript", "sqlx"] }
+specta = { workspace = true }
 specta-typescript = { workspace = true }
 specta-jsdoc = { workspace = true }
 tauri-plugin-os = "^2.0.0-alpha.2"
